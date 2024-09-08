@@ -1,0 +1,12 @@
+.vscode/
+data/
+include/
+lib/
+bin/
+configs/
+*/__pycache__
+__pycache__/
+pyvenv.cfg
+lib64
+*.json
+*.txt
