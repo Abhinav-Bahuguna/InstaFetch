@@ -1,85 +1,94 @@
-import requests
+import os
 import json
-
+import requests
 from time import sleep
-from configs import common
-from configs import headers
-from configs import cookies
-from configs import variables as req
-from utils import random_sleep as rs
+
+from utility_functions import ensure_directory_exists, save_json, random_sleep
+
+from configs import common, headers, cookies, variables as req
+from config import (
+    USERS_LIST,
+    RETRY_ATTEMPTS,
+    BACKOFF_FACTOR,
+    RANDOM_SLEEP_MIN,
+    RANDOM_SLEEP_MAX,
+    FINAL_SLEEP_MIN,
+    FINAL_SLEEP_MAX,
+    RAW_DATA_PATH,
+)
 
 
-def saveAsJson(data, filename):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=4)
-
-
-def requestUserDataViaInstaApi(headers, cookies, data, retries=3, backoff_factor=2):
+def fetch_user_data(
+    headers, cookies, data, retries=RETRY_ATTEMPTS, backoff_factor=BACKOFF_FACTOR
+):
+    """Fetches user data from Instagram API with retry logic."""
     for attempt in range(1, retries + 1):
         try:
-            _response = requests.post(
+            response = requests.post(
                 common.URL, headers=headers, cookies=cookies, data=data
             )
 
-            if _response.status_code == 200:
-                response = json.loads(_response.text)
-                query_result = response["data"][
+            if response.status_code == 200:
+                json_response = response.json()
+                query_result = json_response["data"][
                     "xdt_api__v1__feed__user_timeline_graphql_connection"
                 ]
-                edges = query_result["edges"]
-                page_info = query_result["page_info"]
-
-                return edges, page_info
-            else:
-                print(
-                    f"Attempt {attempt} failed with status code {_response.status_code}"
+                return query_result.get("edges", []), query_result.get(
+                    "page_info", {"has_next_page": False}
                 )
 
+            print(
+                f"⚠️ Attempt {attempt}: Request failed with status code {response.status_code}"
+            )
+
         except requests.exceptions.RequestException as e:
-            print(f"Attempt {attempt} failed with error: {e}")
-            sleep_time = backoff_factor * (2 ** (attempt - 1))
-            print(f"Retrying in {sleep_time} seconds...")
-            sleep(sleep_time)
+            print(f"❌ Attempt {attempt}: Network error: {e}")
+
+        # Exponential backoff for retries
+        sleep_time = backoff_factor * (2 ** (attempt - 1))
+        print(f"⏳ Retrying in {sleep_time} seconds...")
+        sleep(sleep_time)
 
     return [], {"has_next_page": False}
 
 
-def getUserData(username):
-    variables = {**req.variables, "username": username, "after": "null"}
+def get_user_posts(username):
+    """Retrieves all posts for a given username using pagination."""
+    variables = {**req.variables, "username": username, "after": None}
     data = req.data.copy()
     data["variables"] = json.dumps(variables)
 
+    collected_posts = []
     page_info = {"has_next_page": True}
-    _data = []
 
-    while page_info["has_next_page"]:
-        edges, page_info = requestUserDataViaInstaApi(
-            headers.headers, cookies.cookies, data
-        )
-        _data.extend(edges)
+    while page_info.get("has_next_page"):
+        edges, page_info = fetch_user_data(headers.headers, cookies.cookies, data)
+        collected_posts.extend(edges)
 
-        variables["after"] = page_info["end_cursor"]
+        # Update cursor for next page
+        variables["after"] = page_info.get("end_cursor")
         data["variables"] = json.dumps(variables)
-        print(f"Number of Posts Collected So Far: {len(_data)}")
 
-        rs.random_sleep(1, 5)
+        print(f"📊 Posts collected so far for {username}: {len(collected_posts)}")
 
-    return _data
+        random_sleep(RANDOM_SLEEP_MIN, RANDOM_SLEEP_MAX)
+
+    return collected_posts
+
+
+def main():
+    for user in USERS_LIST:
+        print(f"🚀 Fetching posts for user: {user}")
+        user_posts = get_user_posts(user)
+        print(f"✅ Total posts fetched for {user}: {len(user_posts)}")
+
+        # Ensure directory exists and save data
+        file_path = os.path.join(RAW_DATA_PATH, f"{user}.json")
+        ensure_directory_exists(file_path)
+        save_json(user_posts, file_path)
+
+        random_sleep(FINAL_SLEEP_MIN, FINAL_SLEEP_MAX)
 
 
 if __name__ == "__main__":
-    # users_list = ["blokewithabind"]
-    users_list = ["_aayuuuuuuu_"]
-    # users_list = ["bishtaashima1"]
-
-    for user in users_list:
-        userData = getUserData(user)
-        print(f"Posts Count [{user}]: {len(userData)}")
-
-        # Saving Data
-        download_at = f"./data/raw/{user}.json"
-        saveAsJson(userData, download_at)
-        print(f"Data Saved [{user}]: {download_at}")
-
-        rs.random_sleep(4, 8)
-
+    main()

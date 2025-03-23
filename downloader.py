@@ -1,28 +1,10 @@
-import requests
-import json
-import random
-import string
-import os
-
-
-def download_file(url, filename):
-    try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()  # Raise an error for bad status codes
-
-        with open(filename, "wb") as file:
-            for chunk in response.iter_content(1024):
-                file.write(chunk)
-
-        print(f"File downloaded successfully: {filename}")
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading file: {e}")
-
-
-def readDataFrom(filename):
-    with open(filename, "r") as f:
-        return f.read()
+from utility_functions import (
+    ensure_directory_exists,
+    generate_random_string,
+    read_json,
+    download_file,
+)
+from config import PROCESSED_DATA_PATH, USER_MEDIA_PATH, USERS_LIST, FEED_DIR, CLIPS_DIR
 
 
 def get_carousel_media(media):
@@ -41,40 +23,26 @@ def get_urls(post):
         return [{"type": post["product_type"], "url": post["media"]["url"]}]
 
 
-def generateRandomString(length=10):
-    return "".join(
-        random.SystemRandom().choice(string.ascii_uppercase + string.digits)
-        for _ in range(length)
-    )
-
-
 if __name__ == "__main__":
-    raw_data_path = "./data/processed/"
-    raw_files = [
-        f
-        for f in os.listdir(raw_data_path)
-        if os.path.isfile(os.path.join(raw_data_path, f))
-    ]
+    for username in USERS_LIST:
+        required_dirs = [
+            f"{USER_MEDIA_PATH}/{username}/{FEED_DIR}",
+            f"{USER_MEDIA_PATH}/{username}/{CLIPS_DIR}",
+        ]
+        for dir in required_dirs:
+            ensure_directory_exists(dir)
 
-    raw_files = ["bishtaashima1.json"]
-
-    for raw_file in raw_files:
-        content = readDataFrom(f"{raw_data_path}/{raw_file}")
-        posts = json.loads(content)["posts"]
+        posts = read_json(f"{PROCESSED_DATA_PATH}/{username}.json")["posts"]
 
         posts_urls = [get_urls(post) for post in posts]
 
         for post_urls in posts_urls:
-            for post_url in post_urls:
-                filename = generateRandomString(15)
-                post_type = post_url["type"]
-                post_url = post_url["url"]
+            for post in post_urls:
+                filename = generate_random_string(15)
 
-                if post_type == "feed":
-                    download_file(
-                        post_url, f"./data/users/bishtaashima1/images/{filename}.jpg"
-                    )
-                else:
-                    download_file(
-                        post_url, f"./data/users/bishtaashima1/clips/{filename}.mp4"
-                    )
+                download_file(
+                    post["url"],
+                    f"{USER_MEDIA_PATH}/{username}/{FEED_DIR}/{filename}.jpg"
+                    if post["type"] == "feed"
+                    else f"{USER_MEDIA_PATH}/{username}/{CLIPS_DIR}/{filename}.mp4",
+                )
